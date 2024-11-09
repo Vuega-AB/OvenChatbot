@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Component Replacement Chatbot</title>
+</head>
+<body>
+    <h1>Find Replacement Part</h1>
+    <form action="/query" method="post" enctype="multipart/form-data">
+        <input type="text" name="description" placeholder="Describe the issue...">
+        <input type="file" name="image" accept="image/*">
+        <button type="submit">Submit</button>
+    </form>
+    <div id="response"></div>
+</body>
+</html>
