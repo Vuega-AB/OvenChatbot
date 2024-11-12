@@ -3,6 +3,9 @@ from torch import nn
 from torchvision import models, transforms
 from PIL import Image
 from sentence_transformers import SentenceTransformer
+import fitz
+import os
+import uuid
 
 # Load models
 text_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -38,14 +41,13 @@ def generate_text_embedding(text):
     return text_model.encode(text)
 
 def generate_image_embedding(image_path):
-    image = Image.open(image_path)
+    image = Image.open(image_path).convert("RGB")  # Ensure image is in RGB format
     image = preprocess(image).unsqueeze(0)
     
     with torch.no_grad():
-        # Get feature vector from ResNet50
         image_embedding = image_model(image).squeeze().numpy()  # Shape (2048,)
         image_embedding = torch.tensor(image_embedding, dtype=torch.float32)
-        # Reduce the image embedding to 384 dimensions
         image_embedding = image_embedding_net(image_embedding).numpy()
     
     return image_embedding
+

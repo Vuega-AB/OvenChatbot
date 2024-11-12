@@ -4,3 +4,9 @@ torch
 torchvision
 faiss-cpu
 Pillow
+fitz
+tools
+fronend
+numpy
+pandas
+pymupdf # Check the correctness of this

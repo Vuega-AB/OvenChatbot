@@ -2,15 +2,124 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Component Replacement Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        header, .container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 10px 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        h1 {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        input[type="text"], input[type="file"], button {
+            display: block;
+            margin: 10px 0;
+            padding: 8px;
+            font-size: 1em;
+            width: 100%;
+            max-width: 400px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 10px 15px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #response {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            display: none; /* Initially hidden */
+        }
+        .form-section {
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Find Replacement Part</h1>
-    <form action="/query" method="post" enctype="multipart/form-data">
-        <input type="text" name="description" placeholder="Describe the issue...">
-        <input type="file" name="image" accept="image/*">
-        <button type="submit">Submit</button>
-    </form>
-    <div id="response"></div>
+    <header>
+        <h1>Component Replacement Chatbot</h1>
+    </header>
+    
+    <div class="container">
+        <!-- Form for querying replacement part -->
+        <div class="form-section">
+            <h2>Find Replacement Part</h2>
+            <form action="/query" method="post" enctype="multipart/form-data">
+                <label for="description">Description of the issue:</label>
+                <input type="text" id="description" name="description" placeholder="Describe the issue (e.g., broken handle)...">
+                
+                <label for="image">Upload Component Image:</label>
+                <input type="file" id="image" name="image" accept="image/*">
+                
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+        
+        <!-- Form for uploading a PDF for training -->
+        <div class="form-section">
+            <h2>Upload PDF for Training</h2>
+            <form action="/process_pdf" method="post" enctype="multipart/form-data">
+                <label for="pdf">Upload Document (PDF):</label>
+                <input type="file" id="pdf" name="pdf" accept="application/pdf">
+                
+                <button type="submit">Upload PDF</button>
+            </form>
+        </div>
+
+        <!-- Response area -->
+        <div id="response">
+            <h3>Response:</h3>
+            <p id="response-content"></p>
+        </div>
+    </div>
+
+    <script>
+        // Basic script to display the response div (if you are fetching dynamic responses from the backend)
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault(); // Prevent form from refreshing the page
+                const formData = new FormData(form);
+                const action = form.action;
+
+                // Basic fetch request (replace URL handling logic with actual server communication)
+                fetch(action, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const responseDiv = document.getElementById('response');
+                    responseDiv.style.display = 'block';
+                    document.getElementById('response-content').innerText = JSON.stringify(data, null, 2);
+                })
+                .catch(error => {
+                    alert('An error occurred: ' + error);
+                });
+            });
+        });
+    </script>
 </body>
 </html>

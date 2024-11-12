@@ -9,7 +9,7 @@ data_path = './data/components.csv'
 df = pd.read_csv(data_path)
 
 # Initialize FAISS index
-dimension = 512  # Assuming 512-dimensional embeddings (you can adjust this)
+dimension = 384  # Assuming 512-dimensional embeddings (you can adjust this)
 index = faiss.IndexFlatL2(dimension)
 
 components = []
@@ -36,7 +36,12 @@ for idx, row in df.iterrows():
         'image': image_filename,
         'embedding': combined_embedding
     })
-    
+
+    print("Text embedding shape:", text_embedding.shape)
+    print("Image embedding shape:", image_embedding.shape)
+    print("Combined embedding shape:", combined_embedding.shape)
+
+        
     # Add combined embedding to the FAISS index
     index.add(np.array([combined_embedding], dtype=np.float32))
 
