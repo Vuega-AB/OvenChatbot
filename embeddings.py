@@ -1,20 +1,23 @@
 import torch
 from torch import nn
-from torchvision import models, transforms
+from efficientnet_pytorch import EfficientNet
+from torchvision import transforms
 from PIL import Image
 from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # Load models
 text_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Load ResNet-50 model
-image_model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+# Load EfficientNet model
+image_model = EfficientNet.from_pretrained('efficientnet-b0')
 image_model.eval()
 
-# Remove the fully connected layer to get the raw feature map (2048-dimensional)
-image_model = nn.Sequential(*list(image_model.children())[:-1])  # Remove the last FC layer
+# Device setup
+device = "cuda" if torch.cuda.is_available() else "cpu"
+image_model.to(device)
 
-# Image preprocessing
+# Image preprocessing for EfficientNet
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -26,26 +29,29 @@ preprocess = transforms.Compose([
 class ImageEmbeddingNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc = nn.Linear(2048, 384)  # Reduce to 384 dimensions (same as text)
+        self.fc = nn.Linear(1280, 384)
 
     def forward(self, x):
         return self.fc(x)
 
 # Initialize the image embedding network
-image_embedding_net = ImageEmbeddingNet()
+image_embedding_net = ImageEmbeddingNet().to(device)
 
 def generate_text_embedding(text):
     return text_model.encode(text)
 
 def generate_image_embedding(image_path):
-    image = Image.open(image_path)
-    image = preprocess(image).unsqueeze(0)
-    
-    with torch.no_grad():
-        # Get feature vector from ResNet50
-        image_embedding = image_model(image).squeeze().numpy()  # Shape (2048,)
-        image_embedding = torch.tensor(image_embedding, dtype=torch.float32)
-        # Reduce the image embedding to 384 dimensions
-        image_embedding = image_embedding_net(image_embedding).numpy()
-    
-    return image_embedding
+    try:
+        with Image.open(image_path) as image:
+            image = preprocess(image).unsqueeze(0).to(device)
+            
+            with torch.no_grad():
+                # Get feature vector from EfficientNet
+                image_embedding = image_model.extract_features(image)
+                image_embedding = image_embedding.mean([2, 3])  # Global average pooling
+                image_embedding = image_embedding_net(image_embedding).cpu().numpy().flatten()
+        
+        return image_embedding
+    except Exception as e:
+        print(f"Error generating image embedding: {e}")
+        return np.zeros(384)  # Return zero vector in case of error

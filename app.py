@@ -10,19 +10,18 @@ def index():
 @app.route("/query", methods=["POST"])
 def query():
     # Get description and uploaded image from the form
-    description = request.form["description"]
+    description = request.form.get("description", "")
     image_file = request.files["image"]
     
-    # Save the image to a temporary path
+    # Save the uploaded image to a temporary path
     image_path = "./data/uploaded_image.jpg"
     image_file.save(image_path)
 
     # Retrieve the best matching component(s)
     result = retrieve_component(description, image_path)
 
-    # Return the result as a JSON response
+    # Return the result as JSON
     return jsonify({"response": result})
-
 
 if __name__ == "__main__":
     app.run(debug=True)
