@@ -20,12 +20,29 @@ for idx, row in df.iterrows():
     image_filename = row['Image']
     image_path = os.path.join('./data/images', image_filename)
     
-    # Generate embeddings for description and image
-    text_embedding = generate_text_embedding(description)
-    image_embedding = generate_image_embedding(image_path)
+    try:
+        # Generate text embedding
+        text_embedding = generate_text_embedding(description) if description else np.zeros(dimension)
+    except Exception as e:
+        print(f"Error generating text embedding for row {idx}: {e}")
+        text_embedding = np.zeros(dimension)
     
-    # Average text and image embeddings (if description is provided)
-    combined_embedding = (text_embedding + image_embedding) / 2 if description else image_embedding
+    try:
+        # Generate image embedding
+        if os.path.exists(image_path):
+            image_embedding = generate_image_embedding(image_path)
+        else:
+            print(f"Image file not found: {image_path}")
+            image_embedding = np.zeros(dimension)
+    except Exception as e:
+        print(f"Error generating image embedding for {image_path}: {e}")
+        image_embedding = np.zeros(dimension)
+    
+    # Combine embeddings (average if both are present)
+    combined_embedding = (text_embedding + image_embedding) / 2 if np.linalg.norm(text_embedding) > 0 else image_embedding
+
+    # Normalize the combined embedding
+    combined_embedding /= np.linalg.norm(combined_embedding) if np.linalg.norm(combined_embedding) > 0 else 1.0
     
     components.append({
         'id': row['No.'],
@@ -36,24 +53,45 @@ for idx, row in df.iterrows():
     })
     
     # Add embedding to FAISS index
-    index.add(np.array([combined_embedding], dtype=np.float32))
+    if np.linalg.norm(combined_embedding) > 0:  # Check for valid embedding
+        index.add(np.array([combined_embedding], dtype=np.float32))
+    else:
+        print(f"Invalid embedding for component {row['No.']} - Skipped.")
 
-def retrieve_component(description, image_path):
-    # Generate embedding from input image
-    image_embedding = generate_image_embedding(image_path)
+def retrieve_component(description, image_path, k=3):
+    try:
+        # Generate embedding from input image
+        image_embedding = generate_image_embedding(image_path)
+    except Exception as e:
+        print(f"Error generating input image embedding: {e}")
+        image_embedding = np.zeros(dimension)
     
-    # If description is provided, combine embeddings
+    # Combine input embeddings if description is provided
     if description:
-        text_embedding = generate_text_embedding(description)
+        try:
+            text_embedding = generate_text_embedding(description)
+        except Exception as e:
+            print(f"Error generating input text embedding: {e}")
+            text_embedding = np.zeros(dimension)
         combined_input_embedding = (text_embedding + image_embedding) / 2
     else:
         combined_input_embedding = image_embedding
 
+    # Normalize the combined input embedding
+    combined_input_embedding /= np.linalg.norm(combined_input_embedding) if np.linalg.norm(combined_input_embedding) > 0 else 1.0
     combined_input_embedding = combined_input_embedding.reshape(1, -1).astype('float32')
 
     # Perform FAISS search
-    _, indices = index.search(combined_input_embedding, k=3)
+    _, indices = index.search(combined_input_embedding, k=k)
     
-    # Get matching components
-    matching_components = [components[i] for i in indices[0]]
-    return [{"id": comp['id'], "name": comp['name']} for comp in matching_components]
+    # Retrieve matching components
+    matching_components = [
+        {
+            "id": components[i]['id'],
+            "name": components[i]['name'],
+            "image": components[i]['image'],
+            "score": _
+        }
+        for i in indices[0]
+    ]
+    return matching_components

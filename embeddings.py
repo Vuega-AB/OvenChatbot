@@ -43,6 +43,13 @@ def generate_text_embedding(text):
 def generate_image_embedding(image_path):
     try:
         with Image.open(image_path) as image:
+            # Convert image to grayscale (black and white)
+            image = image.convert("L")
+            
+            # Convert grayscale image back to 3 channels for model compatibility
+            image = image.convert("RGB")
+            
+            # Preprocess the image
             image = preprocess(image).unsqueeze(0).to(device)
             
             with torch.no_grad():
@@ -50,8 +57,10 @@ def generate_image_embedding(image_path):
                 image_embedding = image_model.extract_features(image)
                 image_embedding = image_embedding.mean([2, 3])  # Global average pooling
                 image_embedding = image_embedding_net(image_embedding).cpu().numpy().flatten()
+                image_embedding = image_embedding / np.linalg.norm(image_embedding)  # Normalize
         
         return image_embedding
     except Exception as e:
         print(f"Error generating image embedding: {e}")
         return np.zeros(384)  # Return zero vector in case of error
+
