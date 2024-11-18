@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 
 # Load models
-text_model = SentenceTransformer('all-MiniLM-L6-v2')
+text_model = SentenceTransformer('multi-qa-mpnet-base-dot-v1')
 
 # Load EfficientNet model
 image_model = EfficientNet.from_pretrained('efficientnet-b0')
@@ -38,7 +38,10 @@ class ImageEmbeddingNet(nn.Module):
 image_embedding_net = ImageEmbeddingNet().to(device)
 
 def generate_text_embedding(text):
-    return text_model.encode(text)
+    text_embedding= text_model.encode(text, normalize_embeddings=True)
+    split_embeddings = np.array_split(text_embedding, 384)
+    pooled_embedding = np.array([np.mean(chunk) for chunk in split_embeddings])
+    return pooled_embedding
 
 def generate_image_embedding(image_path):
     try:
