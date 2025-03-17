@@ -1,14 +1,14 @@
 import streamlit as st
 from pdf2image import convert_from_bytes
-import pytesseract
+import faiss
 import google.generativeai as genai
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import tempfile
 import os
 from dotenv import load_dotenv
 from PIL import Image
 import io
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
 
 load_dotenv()
 
@@ -18,12 +18,7 @@ genai.configure(api_key=api_key)
 
 def pdf_to_images(pdf_bytes):
     print("Converting PDF to images...")
-    return convert_from_bytes(pdf_bytes.read(), dpi=300)
-
-def image_to_bytes(image):
-    img_byte_arr = io.BytesIO()
-    image.save(img_byte_arr, format="PNG")
-    return img_byte_arr.getvalue()
+    return convert_from_bytes(pdf_bytes.read(), dpi=200)
 
 def summarize_page(image):
     print("Summarizing page...")
@@ -42,21 +37,29 @@ def summarize_page(image):
 def process_manual(pdf_file):
     print("Processing uploaded manual...")
     images = pdf_to_images(pdf_file)
-    page_data = []
-    for idx, image in enumerate(images):
-        print(f"Processing page {idx + 1}...")
-        summary = summarize_page(image)
-        page_data.append({"image": image, "summary": summary})
+    
+    with ThreadPoolExecutor() as executor:
+        summaries = list(executor.map(summarize_page, images))  # Parallel processing
+
+    page_data = [{"image": img, "summary": sum_text} for img, sum_text in zip(images, summaries)]
     print(f"Finished processing {len(images)} pages.")
     return page_data
 
-def find_relevant_pages(query, manual):
+# --- Fast Page Retrieval with FAISS ---
+def index_summaries(manual):
     summaries = [page["summary"] for page in manual]
-    print(f"Finding relevant pages for query: {query}")
-    vectorizer = TfidfVectorizer().fit_transform([query] + summaries)
-    similarities = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
-    print("Top relevant pages found")
-    return similarities.argsort()[-4:][::-1]  # Get top 4 relevant pages
+    vectorizer = TfidfVectorizer()
+    vectors = vectorizer.fit_transform(summaries).toarray()
+    
+    index = faiss.IndexFlatL2(vectors.shape[1])  # L2 (Euclidean distance)
+    index.add(np.array(vectors, dtype=np.float32))
+    
+    return index, vectorizer
+
+def find_relevant_pages(query, index, vectorizer, manual):
+    query_vector = vectorizer.transform([query]).toarray().astype(np.float32)
+    _, indices = index.search(query_vector, 4)  # Get top 5 pages
+    return indices.flatten()
 
 def ask_gemini(query, relevant_pages, manual, uploaded_image=None):
     """Sends a structured query to Gemini using relevant manual pages and user-uploaded image."""
@@ -115,6 +118,7 @@ if pdf_file:
     st.info("Processing manual... This may take a few minutes.")
     page_data = process_manual(pdf_file)
     st.session_state["manual"] = page_data
+    st.session_state["faiss_index"], st.session_state["vectorizer"] = index_summaries(st.session_state["manual"])
     st.success("Manual processed successfully!")
 
     # Reset the file uploader by incrementing the key
@@ -136,7 +140,7 @@ col1, col2 = st.columns([4, 1])
 submit_clicked = col2.button("Send", use_container_width=True)
 
 if submit_clicked and query and "manual" in st.session_state:
-    relevant_pages = find_relevant_pages(query, st.session_state["manual"])
+    relevant_pages = find_relevant_pages(query, st.session_state["faiss_index"], st.session_state["vectorizer"], st.session_state["manual"])
     print(relevant_pages)
     # Convert uploaded image to PIL format if provided
     user_image = Image.open(uploaded_image) if uploaded_image else None
