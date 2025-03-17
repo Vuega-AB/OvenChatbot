@@ -7,78 +7,142 @@ from sklearn.metrics.pairwise import cosine_similarity
 import tempfile
 import os
 from dotenv import load_dotenv
+from PIL import Image
+import io
 
 load_dotenv()
 
 # Configure Gemini API
-api_key=os.getenv("api_key")
+api_key = os.getenv("api_key")
 genai.configure(api_key=api_key)
 
 def pdf_to_images(pdf_bytes):
-    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-        tmpfile.write(pdf_bytes.read())
-        images = convert_from_bytes(open(tmpfile.name, "rb").read(), dpi=300)
-    return images
+    print("Converting PDF to images...")
+    return convert_from_bytes(pdf_bytes.read(), dpi=300)
+
+def image_to_bytes(image):
+    img_byte_arr = io.BytesIO()
+    image.save(img_byte_arr, format="PNG")
+    return img_byte_arr.getvalue()
 
 def summarize_page(image):
+    print("Summarizing page...")
     model = genai.GenerativeModel("gemini-2.0-flash")
-    prompt = "Summarize the content of this manual page."
+    prompt = (
+        "You are processing a user manual page. Extract key information that will help "
+        "answer user questions about the device. Focus on functionality, instructions, warnings, "
+        "and any important technical details. Avoid generalizations and prioritize useful content."
+        "The summary would be used as a way to understand the content of the page and choses the pages relative to user query."
+        "Instructions:\n"
+        "- just respond with the summary directly.\n"
+    )
     response = model.generate_content([prompt, image])
     return response.text
 
 def process_manual(pdf_file):
+    print("Processing uploaded manual...")
     images = pdf_to_images(pdf_file)
     page_data = []
-    summaries = []
-    for image in images:
+    for idx, image in enumerate(images):
+        print(f"Processing page {idx + 1}...")
         summary = summarize_page(image)
         page_data.append({"image": image, "summary": summary})
-        summaries.append(summary)
-    return page_data, summaries
+    print(f"Finished processing {len(images)} pages.")
+    return page_data
 
-def find_relevant_pages(query, summaries):
+def find_relevant_pages(query, manual):
+    summaries = [page["summary"] for page in manual]
+    print(f"Finding relevant pages for query: {query}")
     vectorizer = TfidfVectorizer().fit_transform([query] + summaries)
     similarities = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
-    return similarities.argsort()[-3:][::-1]  # Get top 3 relevant pages
+    print("Top relevant pages found")
+    return similarities.argsort()[-4:][::-1]  # Get top 4 relevant pages
 
-def ask_gemini(query, relevant_pages, manual):
+def ask_gemini(query, relevant_pages, manual, uploaded_image=None):
+    """Sends a structured query to Gemini using relevant manual pages and user-uploaded image."""
+    print(f"Querying Gemini with question: {query}")
+    print(f"Relevant pages: {relevant_pages}")
     model = genai.GenerativeModel("gemini-2.0-flash")
-    context = "\n\n".join([manual[i]["summary"] for i in relevant_pages])
+    
+    # context = "\n\n".join([manual[i]["summary"] for i in relevant_pages])
     images = [manual[i]["image"] for i in relevant_pages]
-    prompt = f"Using the following images and context, answer this question:\n{query}\n\n{context}"
+    
+    prompt = (
+    "You are an AI assistant helping users understand their device by using the provided user manual. "
+    "Your task is to answer the user's question in a helpful and clear manner, based on the relevant pages of the manual. "
+    "You should not just reference the pages, but also include the relevant information from those pages in your response. "
+    "Incorporate key details such as functionality, setup instructions, troubleshooting steps, safety warnings, "
+    "and any important technical aspects mentioned in the manual. If any images or diagrams are provided, "
+    "describe them or use them to enrich the response where appropriate."
+    "\n\n"
+    f"User's question: {query}\n"
+    "Here are the most relevant sections of the manual that will help answer your question:\n"
+    "--------------------------------------------------\n"
+    "Manual Sections:\n"
+)
 
-    # Display the images before sending to Gemini
-    st.subheader("Images Sent to Gemini:")
-    for idx, image in enumerate(images):
-        st.image(image, caption=f"Relevant Page Image {idx+1}")
-
+    
     parts = [prompt]
-    for image in images:
+    
+    # Attach relevant manual images
+    for idx, image in enumerate(images):
+        print(f"Attaching manual image {idx + 1}")
         parts.append(image)
+    
+    # Attach user-uploaded image (if any)
+    if uploaded_image:
+        print("User uploaded an additional image for reference.")
+        parts.append("The user also uploaded this image, which may help in answering the question:")
+        parts.append(uploaded_image)
 
-    response = model.generate_content(parts)
-    return response.text
+    print("try send to Gemini.")
+    try:
+        print(parts)
+        response = model.generate_content(parts)
+        return response.text
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return "An error occurred while processing your request. Please try again later."
 
 # Streamlit UI
 st.title("Device Manual Chatbot")
 
-pdf_file = st.file_uploader("Upload a user manual (PDF)", type=["pdf"])
+if "file_uploader_key" not in st.session_state:
+    st.session_state.file_uploader_key = 0
+
+pdf_file = st.file_uploader("Upload a user manual (PDF)", type=["pdf"], key=f"file_uploader_{st.session_state.file_uploader_key}")
 if pdf_file:
     st.info("Processing manual... This may take a few minutes.")
-    page_data, summaries = process_manual(pdf_file)
+    page_data = process_manual(pdf_file)
     st.session_state["manual"] = page_data
-    st.session_state["summaries"] = summaries
     st.success("Manual processed successfully!")
 
-
-    # Display images with summaries
-    st.subheader("Manual Pages Preview")
-    for idx, data in enumerate(page_data):
-        st.image(data["image"], caption=f"Page {idx+1}")
-        st.write(f"**Summary:** {data['summary']}")
+    # Reset the file uploader by incrementing the key
+    st.session_state.file_uploader_key += 1
+    st.rerun()  # Force a rerun to update the UI immediately
 
 query = st.text_input("Ask a question about your device:")
-if query and "manual" in st.session_state:
-    relevant_pages = find_relevant_pages(query, st.session_state["summaries"])
-    answer = ask_gemini(query, relevant_pages, st.session_state["manual"])
+uploaded_image = st.file_uploader("Upload an image related to your question (optional)", type=["png", "jpg", "jpeg"])
+
+if uploaded_image:
+    # Open and resize the image to a reasonable size for preview
+    user_image = Image.open(uploaded_image)
+    user_image.thumbnail((300, 300))  # Resize the image to 300x300 while maintaining aspect ratio
+    st.image(user_image, caption="Uploaded Image Preview")
+
+# Create columns to align button to the right
+col1, col2 = st.columns([4, 1])
+
+submit_clicked = col2.button("Send", use_container_width=True)
+
+if submit_clicked and query and "manual" in st.session_state:
+    relevant_pages = find_relevant_pages(query, st.session_state["manual"])
+    print(relevant_pages)
+    # Convert uploaded image to PIL format if provided
+    user_image = Image.open(uploaded_image) if uploaded_image else None
+    
+    with st.spinner("Generating response..."):
+        answer = ask_gemini(query, relevant_pages, st.session_state["manual"], user_image)
+    
+    st.subheader("Answer:")
     st.write(answer)
