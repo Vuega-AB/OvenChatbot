@@ -9,6 +9,8 @@ from PIL import Image
 import io
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+import time
+
 
 load_dotenv()
 
@@ -20,19 +22,38 @@ def pdf_to_images(pdf_bytes):
     print("Converting PDF to images...")
     return convert_from_bytes(pdf_bytes.read(), dpi=200)
 
-def summarize_page(image):
+def summarize_page(image, max_retries=5):
+    """Summarizes a page using Gemini API with retry logic in case of quota exhaustion."""
     print("Summarizing page...")
     model = genai.GenerativeModel("gemini-2.0-flash")
+    
     prompt = (
         "You are processing a user manual page. Extract key information that will help "
         "answer user questions about the device. Focus on functionality, instructions, warnings, "
-        "and any important technical details. Avoid generalizations and prioritize useful content."
-        "The summary would be used as a way to understand the content of the page and choses the pages relative to user query."
-        "Instructions:\n"
-        "- just respond with the summary directly.\n"
+        "and any important technical details. Avoid generalizations and prioritize useful content. "
+        "The summary will be used to identify relevant pages for user queries.\n"
+        "- Just respond with the summary directly."
     )
-    response = model.generate_content([prompt, image])
-    return response.text
+    retry_delays = [10, 30] + [60] * (max_retries - 2)
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1} to summarize page")
+            response = model.generate_content([prompt, image])
+            return response.text  # Return the successful summary
+        except Exception as e:
+            error_message = str(e)
+            print(f"Error: {error_message}")
+
+            if "ResourceExhausted" in error_message or "429" in error_message:
+                if attempt < len(retry_delays):  
+                    delay = retry_delays[attempt]  # Use increasing delays
+                    print(f"Quota exceeded, retrying in {delay} seconds...")
+                    time.sleep(delay)
+            else:
+                return "Error summarizing this page. Please try again later."
+
+    return "The system is currently overloaded. Please try again later."
+
 
 def process_manual(pdf_file):
     print("Processing uploaded manual...")
@@ -61,7 +82,7 @@ def find_relevant_pages(query, index, vectorizer, manual):
     _, indices = index.search(query_vector, 4)  # Get top 5 pages
     return indices.flatten()
 
-def ask_gemini(query, relevant_pages, manual, uploaded_image=None):
+def ask_gemini(query, relevant_pages, manual, uploaded_image=None, max_retries=5):
     """Sends a structured query to Gemini using relevant manual pages and user-uploaded image."""
     print(f"Querying Gemini with question: {query}")
     print(f"Relevant pages: {relevant_pages}")
@@ -82,7 +103,7 @@ def ask_gemini(query, relevant_pages, manual, uploaded_image=None):
     "Here are the most relevant sections of the manual that will help answer your question:\n"
     "--------------------------------------------------\n"
     "Manual Sections:\n"
-)
+    )
 
     
     parts = [prompt]
@@ -98,14 +119,26 @@ def ask_gemini(query, relevant_pages, manual, uploaded_image=None):
         parts.append("The user also uploaded this image, which may help in answering the question:")
         parts.append(uploaded_image)
 
-    print("try send to Gemini.")
-    try:
-        print(parts)
-        response = model.generate_content(parts)
-        return response.text
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return "An error occurred while processing your request. Please try again later."
+    retry_delays = [10, 30] + [60] * (max_retries - 2)
+    # Retry logic with exponential backoff
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1} to send request to Gemini")
+            response = model.generate_content(parts)
+            return response.text  # Return the successful response
+        except Exception as e:
+            error_message = str(e)
+            print(f"Error: {error_message}")
+            
+            if "ResourceExhausted" in error_message or "429" in error_message:
+                if attempt < len(retry_delays):  
+                    delay = retry_delays[attempt]  # Use increasing delays
+                    print(f"Quota exceeded, retrying in {delay} seconds...")
+                    time.sleep(delay)
+            else:
+                return "An error occurred while processing your request. Please try again later."
+
+    return "The system is currently overloaded. Please try again later."
 
 # Streamlit UI
 st.title("Device Manual Chatbot")
