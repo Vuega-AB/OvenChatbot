@@ -10,7 +10,7 @@ import io
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import time
-
+import re
 
 load_dotenv()
 
@@ -21,6 +21,15 @@ genai.configure(api_key=api_key)
 def pdf_to_images(pdf_bytes):
     print("Converting PDF to images...")
     return convert_from_bytes(pdf_bytes.read(), dpi=200)
+
+
+def get_retry_delay(error_message):
+    """Extract retry delay (in seconds) from the error message."""
+    match = re.search(r"retry_delay\s*\{\s*seconds:\s*(\d+)", error_message)
+    if match:
+        return int(match.group(1))
+    return 60  # Default to 60s if missing
+    
 
 def summarize_page(image, max_retries=5):
     """Summarizes a page using Gemini API with retry logic in case of quota exhaustion."""
@@ -34,7 +43,7 @@ def summarize_page(image, max_retries=5):
         "The summary will be used to identify relevant pages for user queries.\n"
         "- Just respond with the summary directly."
     )
-    retry_delays = [10, 30] + [60] * (max_retries - 2)
+    # retry_delays = [10, 30] + [60] * (max_retries - 2)
     for attempt in range(max_retries):
         try:
             print(f"Attempt {attempt + 1} to summarize page")
@@ -45,10 +54,9 @@ def summarize_page(image, max_retries=5):
             print(f"Error: {error_message}")
 
             if "ResourceExhausted" in error_message or "429" in error_message:
-                if attempt < len(retry_delays):  
-                    delay = retry_delays[attempt]  # Use increasing delays
-                    print(f"Quota exceeded, retrying in {delay} seconds...")
-                    time.sleep(delay)
+                delay = get_retry_delay(error_message)
+                print(f"Quota exceeded, retrying in {delay} seconds...")
+                time.sleep(delay)
             else:
                 return "Error summarizing this page. Please try again later."
 
@@ -110,7 +118,7 @@ def ask_gemini(query, relevant_pages, manual, uploaded_image=None, max_retries=5
     
     # Attach relevant manual images
     for idx, image in enumerate(images):
-        print(f"Attaching manual image {idx + 1}")
+        # print(f"Attaching manual image {idx + 1}")
         parts.append(image)
     
     # Attach user-uploaded image (if any)
@@ -119,22 +127,22 @@ def ask_gemini(query, relevant_pages, manual, uploaded_image=None, max_retries=5
         parts.append("The user also uploaded this image, which may help in answering the question:")
         parts.append(uploaded_image)
 
-    retry_delays = [10, 30] + [60] * (max_retries - 2)
+    # retry_delays = [10, 30] + [60] * (max_retries - 2)
     # Retry logic with exponential backoff
     for attempt in range(max_retries):
         try:
             print(f"Attempt {attempt + 1} to send request to Gemini")
             response = model.generate_content(parts)
+            print(f"Response received successfully.")
             return response.text  # Return the successful response
         except Exception as e:
             error_message = str(e)
             print(f"Error: {error_message}")
             
             if "ResourceExhausted" in error_message or "429" in error_message:
-                if attempt < len(retry_delays):  
-                    delay = retry_delays[attempt]  # Use increasing delays
-                    print(f"Quota exceeded, retrying in {delay} seconds...")
-                    time.sleep(delay)
+                delay = get_retry_delay(error_message)
+                print(f"Quota exceeded, retrying in {delay} seconds...")
+                time.sleep(delay)
             else:
                 return "An error occurred while processing your request. Please try again later."
 
@@ -152,7 +160,7 @@ if pdf_file:
     page_data = process_manual(pdf_file)
     st.session_state["manual"] = page_data
     st.session_state["faiss_index"], st.session_state["vectorizer"] = index_summaries(st.session_state["manual"])
-    st.success("Manual processed successfully!")
+    # st.success("Manual processed successfully!")
 
     # Reset the file uploader by incrementing the key
     st.session_state.file_uploader_key += 1
